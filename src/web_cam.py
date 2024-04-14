@@ -241,14 +241,14 @@ def verify_face(image, model_trained):
 cap = cv2.VideoCapture(0)  # 0代表计算机的默认摄像头
 
 
-net1 = torch.load(r"C:\Users\lucyc\Desktop\AI_GOGOGO\Pytorch\face_loc\v1\face_loc_p_2.pth")
+net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_p.pth")
 
 p_net = PNet()
 p_net.load_state_dict(net1.state_dict())
 p_net.eval()
 p_net.to(device)
 
-net2 = torch.load(r"C:\Users\lucyc\Desktop\AI_GOGOGO\Pytorch\face_loc\v2\face_loc_r_2_t.pth")
+net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r_2_t.pth")
 
 r_net = RNet()
 r_net.load_state_dict(net2.state_dict())
@@ -274,11 +274,11 @@ while True:
         print("Can't receive frame (stream end?). Exiting ...")
         break
 
-    pyramid = generate_image_pyramid(frame, scale_factor=1.5, min_size=(24, 24))
+    pyramid = generate_image_pyramid(frame, scale_factor=1.2, min_size=(24, 24))
 
     result = []
     for img, scal in pyramid:
-        res = sliding_window(img, step_size=13, window_size=(24, 24), model_trained=p_net)
+        res = sliding_window(img, step_size=15, window_size=(24, 24), model_trained=p_net)
         res = [[x*scal for x in y] for y in res]
         result += res
 
@@ -292,7 +292,7 @@ while True:
             cv2.putText(frame, "Face: {:.2f}".format(score), (x, y+h+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     #显示结果帧
 
-    # for x, y, w, h in result:
+    # for x, y, w, h, _ in result:
     #     x, y, w, h = int(x), int(y), int(w), int(h)
     #     random = np.random.randint(0, 255, 3)
     #     cv2.rectangle(frame, (x, y), (x+w, y+h), (int(random[0]), int(random[1]), int(random[2])), 2)
