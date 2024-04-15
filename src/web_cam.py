@@ -8,7 +8,7 @@ from PIL import Image
 import torch.nn.functional as F
 import time
 
-IMG_INPUT_SIZE = [12,12]
+IMG_INPUT_SIZE = [24,24]
 device = torch.device("cuda:0" if torch.cuda.is_available() else "CPU")
 # 定义转换操作
 transform = transforms.Compose([
@@ -189,8 +189,8 @@ def sliding_window(image, step_size, window_size, model_trained):
             
 
             window_tensor = transform(image_pil).unsqueeze(0).to(device)
-            x_scale = w / 12
-            y_scale = h / 12
+            x_scale = w / 24
+            y_scale = h / 24
 
             with torch.no_grad():
                 face_det, bbox, _ = model_trained(window_tensor)
@@ -198,7 +198,7 @@ def sliding_window(image, step_size, window_size, model_trained):
             #result.append((x, y, window_size[0], window_size[1]))
             probabilities = F.softmax(face_det, dim=1)
             
-            if probabilities[0][0] > 0.90:
+            if probabilities[0][0] > 0.80:
                 result.append((x, y, window_size[0], window_size[1], face_det[0][0] - face_det[0][1]))
 
                 # nx = bbox[0][0].item() * x_scale + x
@@ -248,7 +248,7 @@ p_net.load_state_dict(net1.state_dict())
 p_net.eval()
 p_net.to(device)
 
-net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r_30.pth")
+net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r.pth")
 
 r_net = RNet()
 r_net.load_state_dict(net2.state_dict())
@@ -278,19 +278,19 @@ while True:
 
     result = []
     for img, scal in pyramid:
-        res = sliding_window(img, step_size=15, window_size=(24, 24), model_trained=p_net)
+        res = sliding_window(img, step_size=15, window_size=(24, 24), model_trained=r_net)
         res = [[x*scal for x in y] for y in res]
         result += res
 
     result = nms(result, 0.3)
 
-    for x, y, w, h, score in result:
-        x, y, w, h = int(x), int(y), int(w), int(h)
+    # for x, y, w, h, score in result:
+    #     x, y, w, h = int(x), int(y), int(w), int(h)
 
-        if verify_face(frame[y:y+h, x:x+w], r_net):
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(frame, "Face: {:.2f}".format(score), (x, y+h+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-    #显示结果帧
+    #     if verify_face(frame[y:y+h, x:x+w], r_net):
+    #         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+    #         cv2.putText(frame, "Face: {:.2f}".format(score), (x, y+h+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    # #显示结果帧
 
     for x, y, w, h, _ in result:
         x, y, w, h = int(x), int(y), int(w), int(h)
