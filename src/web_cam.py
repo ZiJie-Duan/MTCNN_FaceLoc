@@ -198,7 +198,7 @@ def sliding_window(image, step_size, window_size, model_trained):
             #result.append((x, y, window_size[0], window_size[1]))
             probabilities = F.softmax(face_det, dim=1)
             
-            if probabilities[0][0] > 0.7:
+            if probabilities[0][0] > 0.90:
                 result.append((x, y, window_size[0], window_size[1], face_det[0][0] - face_det[0][1]))
 
                 # nx = bbox[0][0].item() * x_scale + x
@@ -248,7 +248,7 @@ p_net.load_state_dict(net1.state_dict())
 p_net.eval()
 p_net.to(device)
 
-net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r_2_t.pth")
+net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r_30.pth")
 
 r_net = RNet()
 r_net.load_state_dict(net2.state_dict())
@@ -292,10 +292,10 @@ while True:
             cv2.putText(frame, "Face: {:.2f}".format(score), (x, y+h+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     #显示结果帧
 
-    # for x, y, w, h, _ in result:
-    #     x, y, w, h = int(x), int(y), int(w), int(h)
-    #     random = np.random.randint(0, 255, 3)
-    #     cv2.rectangle(frame, (x, y), (x+w, y+h), (int(random[0]), int(random[1]), int(random[2])), 2)
+    for x, y, w, h, _ in result:
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        random = np.random.randint(0, 255, 3)
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (int(random[0]), int(random[1]), int(random[2])), 2)
 
     # 打印边框数量
     cv2.putText(frame, "Number of faces: {}".format(len(result)), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
