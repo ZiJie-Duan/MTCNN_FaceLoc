@@ -7,7 +7,7 @@ import torch
 from torchvision import transforms
 
 
-IMG_INPUT_SIZE = [24,24]
+IMG_INPUT_SIZE = [12,12]
 
 # 定义转换操作
 transform = transforms.Compose([
