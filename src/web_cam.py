@@ -198,7 +198,8 @@ def sliding_window(image, step_size, window_size, model_trained):
             #result.append((x, y, window_size[0], window_size[1]))
             probabilities = F.softmax(face_det, dim=1)
             
-            if probabilities[0][0] > 0.80:
+            if probabilities[0][0] > 0.50:
+                print(probabilities[0][0])
                 result.append((x, y, window_size[0], window_size[1], face_det[0][0] - face_det[0][1]))
 
                 # nx = bbox[0][0].item() * x_scale + x
@@ -248,7 +249,7 @@ p_net.load_state_dict(net1.state_dict())
 p_net.eval()
 p_net.to(device)
 
-net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r.pth")
+net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r_48.pth")
 
 r_net = RNet()
 r_net.load_state_dict(net2.state_dict())
@@ -274,11 +275,11 @@ while True:
         print("Can't receive frame (stream end?). Exiting ...")
         break
 
-    pyramid = generate_image_pyramid(frame, scale_factor=1.2, min_size=(24, 24))
+    pyramid = generate_image_pyramid(frame, scale_factor=1.3, min_size=(24, 24))
 
     result = []
     for img, scal in pyramid:
-        res = sliding_window(img, step_size=15, window_size=(24, 24), model_trained=r_net)
+        res = sliding_window(img, step_size=13, window_size=(24, 24), model_trained=r_net)
         res = [[x*scal for x in y] for y in res]
         result += res
 
@@ -290,9 +291,9 @@ while True:
     #     if verify_face(frame[y:y+h, x:x+w], r_net):
     #         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
     #         cv2.putText(frame, "Face: {:.2f}".format(score), (x, y+h+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-    # #显示结果帧
+    # # #显示结果帧
 
-    for x, y, w, h, _ in result:
+    for x, y, w, h, score in result:
         x, y, w, h = int(x), int(y), int(w), int(h)
         random = np.random.randint(0, 255, 3)
         cv2.rectangle(frame, (x, y), (x+w, y+h), (int(random[0]), int(random[1]), int(random[2])), 2)
