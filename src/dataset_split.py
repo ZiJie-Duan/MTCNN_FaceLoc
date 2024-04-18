@@ -54,8 +54,9 @@ def split_dataset(csv_file, proportion=[]):
 
 if __name__ == '__main__':
     # 测试
-    split_dataset(r"C:\Users\lucyc\Desktop\face_loc_dataset.csv", [0.6, 0.05, 0.35])
-    print('Done!')
+    for i in range(6):
+        split_dataset(r"C:\Users\lucyc\Desktop\face_loc_dataset\ds_" + str(i) + r".csv", [0.7, 0.1, 0.2])
+        print('Done! ' + str(i))
 
 
 

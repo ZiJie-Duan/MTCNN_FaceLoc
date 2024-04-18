@@ -65,13 +65,11 @@ class FLCDataset(Dataset):
 
         labbel = [int (i) for i in data_info[1].split()]
         labbel = self.lable_transform(labbel, img.size)
-        labbel += [0 for i in range(10-len(labbel))]
+        #labbel += [0 for i in range(10-len(labbel))]
         labbel = torch.tensor(labbel)
 
         if self.transform:
             img = self.transform(img)
-        
-        #labbel = " ".join([str(i) for i in labbel])
 
         return img, labbel, data_info[2]
         
