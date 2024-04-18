@@ -8,7 +8,7 @@ from PIL import Image
 import torch.nn.functional as F
 import time
 
-IMG_INPUT_SIZE = [24,24]
+IMG_INPUT_SIZE = [12,12]
 device = torch.device("cuda:0" if torch.cuda.is_available() else "CPU")
 # 定义转换操作
 transform = transforms.Compose([
@@ -183,6 +183,7 @@ def sliding_window(image, step_size, window_size, model_trained):
             # 提取当前窗口的图像片段
             window = image[y:y + window_size[1], x:x + window_size[0]]
 
+
             image_rgb = cv2.cvtColor(window, cv2.COLOR_BGR2RGB)
             # 将NumPy数组转换为PIL.Image对象
             image_pil = Image.fromarray(image_rgb)
@@ -198,9 +199,8 @@ def sliding_window(image, step_size, window_size, model_trained):
             #result.append((x, y, window_size[0], window_size[1]))
             probabilities = F.softmax(face_det, dim=1)
             
-            if probabilities[0][0] > 0.50:
-                print(probabilities[0][0])
-                result.append((x, y, window_size[0], window_size[1], face_det[0][0] - face_det[0][1]))
+            if probabilities[0][0] > 0.95:
+                result.append((x, y, window_size[0], window_size[1], probabilities[0][0]))
 
                 # nx = bbox[0][0].item() * x_scale + x
                 # ny = bbox[0][1].item() * y_scale + y
@@ -232,17 +232,17 @@ def verify_face(image, model_trained):
         face_det, _,_ = model_trained(image_tensor)
     probabilities = F.softmax(face_det, dim=1)
 
-    if probabilities[0][0] > 0.80:
-        return True
+    if probabilities[0][0] > 0.95:
+        return True, probabilities[0][0]
     else:
-        return False
+        return False, probabilities[0][0]
 
 
 # 初始化摄像头
 cap = cv2.VideoCapture(0)  # 0代表计算机的默认摄像头
 
 
-net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_p.pth")
+net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\pnet_temp\PNet_45.pth")
 
 p_net = PNet()
 p_net.load_state_dict(net1.state_dict())
@@ -264,9 +264,18 @@ if not cap.isOpened():
     exit()
 
 
+# # 打开视频文件
+# file = r"C:\Users\lucyc\Desktop\4月17日.mp4"
+# cap = cv2.VideoCapture(file)
+
+#img = cv2.imread(r"C:\Users\lucyc\Desktop\IMG_20150528_145916.jpg")
+
 while True:
     # 从摄像头读取一帧
     ret, frame = cap.read()
+
+    # frame = img
+    # ret = True
 
     frame = frame[60:-60, :]
 
@@ -279,24 +288,31 @@ while True:
 
     result = []
     for img, scal in pyramid:
-        res = sliding_window(img, step_size=13, window_size=(24, 24), model_trained=r_net)
+        res = sliding_window(img, step_size=13, window_size=(24, 24), model_trained=p_net)
         res = [[x*scal for x in y] for y in res]
         result += res
 
     result = nms(result, 0.3)
 
-    # for x, y, w, h, score in result:
-    #     x, y, w, h = int(x), int(y), int(w), int(h)
+    result2 = []
+    for x, y, w, h, _ in result:
+        x, y, w, h = int(x), int(y), int(w), int(h)
 
-    #     if verify_face(frame[y:y+h, x:x+w], r_net):
-    #         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-    #         cv2.putText(frame, "Face: {:.2f}".format(score), (x, y+h+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-    # # #显示结果帧
+        is_face, score = verify_face(frame[y:y+h, x:x+w], r_net)
+        if is_face:
+            result2.append((x, y, w, h, score))
+    
+    result = nms(result2, 0.3)
 
     for x, y, w, h, score in result:
-        x, y, w, h = int(x), int(y), int(w), int(h)
-        random = np.random.randint(0, 255, 3)
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (int(random[0]), int(random[1]), int(random[2])), 2)
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        cv2.putText(frame, "Face: {:.2f}".format(score), (x, y+h+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    # #显示结果帧
+
+    # for x, y, w, h, score in result:
+    #     x, y, w, h = int(x), int(y), int(w), int(h)
+    #     random = np.random.randint(0, 255, 3)
+    #     cv2.rectangle(frame, (x, y), (x+w, y+h), (int(random[0]), int(random[1]), int(random[2])), 2)
 
     # 打印边框数量
     cv2.putText(frame, "Number of faces: {}".format(len(result)), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -312,3 +328,42 @@ cap.release()
 # 关闭所有OpenCV窗口
 cv2.destroyAllWindows()
 
+
+
+# import cv2
+
+# # 读取图像
+# img_path = r"C:\Users\lucyc\Desktop\IMG_20150528_145916.jpg"
+# img = cv2.imread(img_path)
+
+# # 检查图像是否正确加载
+# if img is None:
+#     print("Can't load image. Exiting ...")
+# else:
+#     # 调整图像，去除上下各60像素
+#     img_cropped = img[60:-60, :]
+
+#     # 假设generate_image_pyramid是一个已定义的函数，用于创建图像金字塔
+#     # 需要提供这个函数的实现
+#     pyramid = generate_image_pyramid(img_cropped, scale_factor=1.5, min_size=(24, 24))
+
+#     results = []
+#     # 处理图像金字塔中的每一层
+#     for img_level, scale in pyramid:
+#         # 这里可以加入图像处理的代码
+#         # 例如：检测图像中的某些特征
+#         results.append((img_level, scale))
+
+
+#         # 检查图像是否正确加载
+#     if img is None:
+#         print("Can't load image. Exiting ...")
+#     else:
+#         # 显示图像
+#         cv2.imshow('Loaded Image', img)
+#         cv2.waitKey(0)  # 等待直到有键盘输入
+#         cv2.destroyAllWindows()  # 关闭显示窗口
+#     # 输出、显示或保存处理结果
+#     print("Processing complete. Number of pyramid levels:", len(results))
+
+# input("Press Enter to continue ...")
