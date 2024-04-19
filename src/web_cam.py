@@ -8,16 +8,22 @@ from PIL import Image
 import torch.nn.functional as F
 import time
 
+
+SLID_COUNT = 0
+
 IMG_INPUT_SIZE = [12,12]
 device = torch.device("cuda:0" if torch.cuda.is_available() else "CPU")
 # 定义转换操作
-transform = transforms.Compose([
-    transforms.Resize(IMG_INPUT_SIZE[0]),
-    transforms.CenterCrop(IMG_INPUT_SIZE[0]),
+transform_pre = transforms.Compose([
     transforms.ToTensor(),  # 将PIL图像或NumPy ndarray转换为FloatTensor。
     transforms.Normalize(mean=[0.485, 0.456, 0.406],  # 标准化，使用ImageNet的均值和标准差
                          std=[0.229, 0.224, 0.225])
 ])
+
+transform_resize = transforms.Compose([
+    transforms.Resize(IMG_INPUT_SIZE[0])
+])
+
 
 transform_r = transforms.Compose([
     transforms.Resize(24),
@@ -130,9 +136,9 @@ class PNet(nn.Module):
         bbox = self.bbox(x)
         landmark = self.landmark(x)
 
-        facedet = torch.flatten(facedet, 1)
-        bbox = torch.flatten(bbox, 1)
-        landmark = torch.flatten(landmark, 1)
+        # facedet = torch.flatten(facedet, 1)
+        # bbox = torch.flatten(bbox, 1)
+        # landmark = torch.flatten(landmark, 1)
 
         return facedet, bbox, landmark
 
@@ -147,7 +153,7 @@ def generate_image_pyramid(img, scale_factor=1.2, min_size=(24, 24)):
     :return: 金字塔图像列表
     """
     pyramid_images = []
-    scale_factor_base = 3
+    scale_factor_base = 4
 
     while True:
         new_width = int(img.shape[1] / scale_factor_base)
@@ -174,24 +180,20 @@ def sliding_window(image, step_size, window_size, model_trained):
     """
     # 图像尺寸
     (h, w) = image.shape[:2]
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image_pil = Image.fromarray(image_rgb)
+    image_tensor = transform_pre(image_pil).unsqueeze(0).to(device)
 
     result = []
-    
+    global SLID_COUNT
     # 逐步移动窗口
     for y in range(0, h - window_size[1], step_size):
         for x in range(0, w - window_size[0], step_size):
             # 提取当前窗口的图像片段
-            window = image[y:y + window_size[1], x:x + window_size[0]]
-
-
-            image_rgb = cv2.cvtColor(window, cv2.COLOR_BGR2RGB)
-            # 将NumPy数组转换为PIL.Image对象
-            image_pil = Image.fromarray(image_rgb)
-            
-
-            window_tensor = transform(image_pil).unsqueeze(0).to(device)
-            x_scale = w / 24
-            y_scale = h / 24
+            SLID_COUNT += 1
+            window_tensor = image_tensor[:, :, y:y + window_size[1], x:x + window_size[0]]
+            # 下采样到 12x12
+            window_tensor = F.interpolate(window_tensor, size=(12, 12), mode='bilinear', align_corners=False)
 
             with torch.no_grad():
                 face_det, bbox, _ = model_trained(window_tensor)
@@ -208,9 +210,64 @@ def sliding_window(image, step_size, window_size, model_trained):
                 # nh = bbox[0][3].item() * y_scale
                 # result.append((nx, ny, nw, nh, face_det[0][0] - face_det[0][1]))
             
-        
     return result
 
+
+def sliding_window2(image, step_size, window_size, model, scale):
+    # 假设 'model' 是你的全卷积网络模型，已加载并设置为评估模式
+    model.eval()
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image_pil = Image.fromarray(image_rgb)
+    image_tensor = transform_pre(image_pil).unsqueeze(0).to(device)
+    model.to(device)
+
+    # 执行前向传播
+    with torch.no_grad():
+        face_det, bbox, landmark = model(image_tensor)
+    
+    # print(face_det.shape)
+    # print(bbox.shape)
+    # print(landmark.shape)
+    """
+    torch.Size([1, 2, 43, 91])
+    torch.Size([1, 4, 43, 91])
+    torch.Size([1, 10, 43, 91])
+    """
+    result = []
+    face_det = F.softmax(face_det, dim=1)
+    for i in range(face_det.shape[2]):
+        for j in range(face_det.shape[3]):
+            if face_det[0][0][i][j] > 0.95:
+                # calculate the scale
+                result.append(((j * 2)*scale, (i * 2)*scale, 12*scale, 12*scale, face_det[0][0][i][j]))
+    # print(result)
+    return result
+
+def sliding_window3(image, step_size, window_size, model, scale):
+    model.eval()
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image_pil = Image.fromarray(image_rgb)
+    image_tensor = transform_pre(image_pil).unsqueeze(0).to(device)
+    model.to(device)
+
+    with torch.no_grad():
+        face_det, bbox, landmark = model(image_tensor)
+
+    face_det = F.softmax(face_det, dim=1)
+    confidence_threshold = 0.95
+    indices = (face_det[0, 0] > confidence_threshold).nonzero(as_tuple=True)
+
+    results = []
+    for i, j in zip(indices[0], indices[1]):
+        x = (j.item() * 2 * scale)
+        y = (i.item() * 2 * scale)
+        w = h = 12 * scale
+        conf = face_det[0, 0, i, j].item()
+        results.append((x, y, w, h, conf))
+
+    return results
+
+    
 
 def verify_face(image, model_trained):
     """
@@ -268,14 +325,16 @@ if not cap.isOpened():
 file = r"C:\Users\lucyc\Desktop\机器人舞蹈大赛.mp4"
 cap = cv2.VideoCapture(file)
 
+cap.set(cv2.CAP_PROP_POS_FRAMES, 5000)
+
 #img = cv2.imread(r"C:\Users\lucyc\Desktop\IMG_20150528_145916.jpg")
 count = 0
 while True:
+    if count > 6:
+        break
+    #count += 1
     # 从摄像头读取一帧
     ret, frame = cap.read()
-    count += 1
-    if count % 10 != 0:
-        continue
     # frame = img
     # ret = True
 
@@ -288,15 +347,13 @@ while True:
 
     pyramid = generate_image_pyramid(frame, scale_factor=1.5, min_size=(24, 24))
 
+    SLID_COUNT = 0
     result = []
     for img, scal in pyramid:
-        res = sliding_window(img, step_size=13, window_size=(24, 24), model_trained=p_net)
-        for x, y, w, h, score in res:
-            x, y, w, h = int(x*scal), int(y*scal), int(w*scal), int(h*scal)
-            result.append((x, y, w, h, score))
+        res = sliding_window3(img, step_size=12, window_size=(24, 24), model=p_net, scale=scal)
+        result += res
 
     result = nms(result, 0.3)
-
     # result2 = []
     # for x, y, w, h, _ in result:
     #     x, y, w, h = int(x), int(y), int(w), int(h)
@@ -320,7 +377,7 @@ while True:
 
     # 打印边框数量
     cv2.putText(frame, "Number of faces: {}".format(len(result)), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
+    cv2.putText(frame, "Number of sliding windows: {}".format(SLID_COUNT), (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     cv2.imshow('Frame with Border', frame)
 
     # 按'q'退出循环
