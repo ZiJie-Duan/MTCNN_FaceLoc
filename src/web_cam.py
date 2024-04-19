@@ -147,7 +147,7 @@ def generate_image_pyramid(img, scale_factor=1.2, min_size=(24, 24)):
     :return: 金字塔图像列表
     """
     pyramid_images = []
-    scale_factor_base = 5
+    scale_factor_base = 3
 
     while True:
         new_width = int(img.shape[1] / scale_factor_base)
@@ -242,19 +242,19 @@ def verify_face(image, model_trained):
 cap = cv2.VideoCapture(0)  # 0代表计算机的默认摄像头
 
 
-net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\pnet_temp\PNet_45.pth")
+net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\pnet.pth")
 
 p_net = PNet()
 p_net.load_state_dict(net1.state_dict())
 p_net.eval()
 p_net.to(device)
 
-net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r_48.pth")
+# net2 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\face_loc_r_48.pth")
 
-r_net = RNet()
-r_net.load_state_dict(net2.state_dict())
-r_net.eval()
-r_net.to(device)
+# r_net = RNet()
+# r_net.load_state_dict(net2.state_dict())
+# r_net.eval()
+# r_net.to(device)
 
 
 
@@ -265,15 +265,17 @@ if not cap.isOpened():
 
 
 # # 打开视频文件
-# file = r"C:\Users\lucyc\Desktop\4月17日.mp4"
-# cap = cv2.VideoCapture(file)
+file = r"C:\Users\lucyc\Desktop\机器人舞蹈大赛.mp4"
+cap = cv2.VideoCapture(file)
 
 #img = cv2.imread(r"C:\Users\lucyc\Desktop\IMG_20150528_145916.jpg")
-
+count = 0
 while True:
     # 从摄像头读取一帧
     ret, frame = cap.read()
-
+    count += 1
+    if count % 10 != 0:
+        continue
     # frame = img
     # ret = True
 
@@ -284,27 +286,29 @@ while True:
         print("Can't receive frame (stream end?). Exiting ...")
         break
 
-    pyramid = generate_image_pyramid(frame, scale_factor=1.3, min_size=(24, 24))
+    pyramid = generate_image_pyramid(frame, scale_factor=1.5, min_size=(24, 24))
 
     result = []
     for img, scal in pyramid:
         res = sliding_window(img, step_size=13, window_size=(24, 24), model_trained=p_net)
-        res = [[x*scal for x in y] for y in res]
-        result += res
+        for x, y, w, h, score in res:
+            x, y, w, h = int(x*scal), int(y*scal), int(w*scal), int(h*scal)
+            result.append((x, y, w, h, score))
 
     result = nms(result, 0.3)
 
-    result2 = []
-    for x, y, w, h, _ in result:
-        x, y, w, h = int(x), int(y), int(w), int(h)
+    # result2 = []
+    # for x, y, w, h, _ in result:
+    #     x, y, w, h = int(x), int(y), int(w), int(h)
 
-        is_face, score = verify_face(frame[y:y+h, x:x+w], r_net)
-        if is_face:
-            result2.append((x, y, w, h, score))
+    #     is_face, score = verify_face(frame[y:y+h, x:x+w], r_net)
+    #     if is_face:
+    #         result2.append((x, y, w, h, score))
     
-    result = nms(result2, 0.3)
+    # result = nms(result2, 0.3)
 
     for x, y, w, h, score in result:
+        x, y, w, h = int(x), int(y), int(w), int(h)
         cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
         cv2.putText(frame, "Face: {:.2f}".format(score), (x, y+h+10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
     # #显示结果帧

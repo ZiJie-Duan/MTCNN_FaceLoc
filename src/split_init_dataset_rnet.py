@@ -1,10 +1,182 @@
 import os
 import csv
 import random
-import cv2
 import math
 import scipy.io
+import cv2
+import torch
 import numpy as np
+from torchvision import transforms
+import torch.nn as nn
+import torch.nn.functional as F
+from PIL import Image
+
+
+IMG_INPUT_SIZE = [12,12]
+device = torch.device("cuda:0" if torch.cuda.is_available() else "CPU")
+# 定义转换操作
+transform = transforms.Compose([
+    transforms.Resize(IMG_INPUT_SIZE[0]),
+    transforms.CenterCrop(IMG_INPUT_SIZE[0]),
+    transforms.ToTensor(),  # 将PIL图像或NumPy ndarray转换为FloatTensor。
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],  # 标准化，使用ImageNet的均值和标准差
+                         std=[0.229, 0.224, 0.225])
+])
+
+
+class PNet(nn.Module):
+
+    def __init__(self):
+        super(PNet, self).__init__()
+
+        # 定义网络层
+        self.conv1 = nn.Conv2d(3, 10, 3)  #12 -> 10 -> maxp -> 5
+        self.conv2 = nn.Conv2d(10, 16, 3) #5 -> 3
+        self.conv3 = nn.Conv2d(16, 32, 3) #3 -> 1
+
+        self.face_det = nn.Conv2d(32, 2, 1) #1 -> 1
+        self.bbox = nn.Conv2d(32, 4, 1) #1 -> 1
+        self.landmark = nn.Conv2d(32, 10, 1) #1 -> 1
+
+    def forward(self, x):
+        # 定义前向传播
+        x = F.relu(self.conv1(x)) #10
+        x = F.max_pool2d(x, 2) #5
+        x = F.relu(self.conv2(x)) #3
+        x = F.relu(self.conv3(x)) #1
+
+        facedet = self.face_det(x)
+        bbox = self.bbox(x)
+        landmark = self.landmark(x)
+
+        facedet = torch.flatten(facedet, 1)
+        bbox = torch.flatten(bbox, 1)
+        landmark = torch.flatten(landmark, 1)
+
+        return facedet, bbox, landmark
+
+
+p_net = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\Pnet_90.pth")
+
+def nms(imgs_list, threshold):
+
+    if imgs_list == []:
+        return []
+
+    imgs_list = sorted(imgs_list, key=lambda x: x[4], reverse=True)
+    max_img = imgs_list[0]
+
+    next_recu_imgs = []
+
+    for i in range(1, len(imgs_list)):
+        if cal_iou_wh(max_img[:4], imgs_list[i][:4]) > threshold:
+            pass
+        else:
+            next_recu_imgs.append(imgs_list[i])
+    
+    return [max_img] + nms(next_recu_imgs, threshold)
+
+
+def cal_iou_wh(boxA, boxB):
+        # 计算两个边界框的坐标
+        boxA = [boxA[0], boxA[1], boxA[0] + boxA[2], boxA[1] + boxA[3]]
+        boxB = [boxB[0], boxB[1], boxB[0] + boxB[2], boxB[1] + boxB[3]]
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[2], boxB[2])
+        yB = min(boxA[3], boxB[3])
+    
+        # 计算交集的面积
+        interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+    
+        # 计算两个边界框的面积
+        boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
+        boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
+    
+        # 计算并集的面积
+        iou = interArea / float(boxAArea + boxBArea - interArea)
+    
+        # 返回计算出的IoU值
+        return iou
+
+
+def generate_image_pyramid(img, scale_factor=1.2, min_size=(24, 24)):
+    """
+    生成图像的金字塔。
+    
+    :param img: 原始图像
+    :param scale_factor: 缩放因子
+    :param min_size: 图像在金字塔中的最小尺寸
+    :return: 金字塔图像列表
+    """
+    pyramid_images = []
+    scale_factor_base = 5
+
+    while True:
+        new_width = int(img.shape[1] / scale_factor_base)
+        new_height = int(img.shape[0] / scale_factor_base)
+
+        if new_width < min_size[0] or new_height < min_size[1]:
+            break
+
+        img2 = cv2.resize(img, (new_width, new_height))
+        pyramid_images.append([img2, scale_factor_base])
+        scale_factor_base *= scale_factor # 可以调整以控制金字塔的级别间隔
+
+    return pyramid_images
+
+
+def sliding_window(image, step_size, window_size, model_trained):
+    """
+    对图像应用滑动窗口，并使用提供的模型检测人脸。
+    
+    :param image: 输入的原始图像
+    :param step_size: 每次滑动的像素数
+    :param window_size: 窗口大小 (宽度, 高度)
+    :param model_trained: 训练好的人脸检测模型
+    """
+    # 图像尺寸
+    (h, w) = image.shape[:2]
+
+    result = []
+    
+    # 逐步移动窗口
+    for y in range(0, h - window_size[1], step_size):
+        for x in range(0, w - window_size[0], step_size):
+            # 提取当前窗口的图像片段
+            window = image[y:y + window_size[1], x:x + window_size[0]]
+
+
+            image_rgb = cv2.cvtColor(window, cv2.COLOR_BGR2RGB)
+            # 将NumPy数组转换为PIL.Image对象
+            image_pil = Image.fromarray(image_rgb)
+            
+
+            window_tensor = transform(image_pil).unsqueeze(0).to(device)
+
+            with torch.no_grad():
+                face_det, bbox, _ = model_trained(window_tensor)
+
+            #result.append((x, y, window_size[0], window_size[1]))
+            probabilities = F.softmax(face_det, dim=1)
+            
+            if probabilities[0][0] > 0.6:
+                result.append((x, y, window_size[0], window_size[1], probabilities[0][0]))
+            
+        
+    return result
+
+
+# pyramid = generate_image_pyramid(frame, scale_factor=1.3, min_size=(24, 24))
+
+# result = []
+# for img, scal in pyramid:
+#     res = sliding_window(img, step_size=13, window_size=(24, 24), model_trained=p_net)
+#     res = [[x*scal for x in y] for y in res]
+#     result += res
+
+# result = nms(result, 0.3)
+
 
 def random_color_shift(img):
     img = img.astype(np.int32) # 转换为整数类型
@@ -297,7 +469,29 @@ class ImgTransform:
     
         # 返回计算出的IoU值
         return iou
-    
+
+    def cal_iou_wh(self, boxA, boxB):
+            # 计算两个边界框的坐标
+            boxA = [boxA[0], boxA[1], boxA[0] + boxA[2], boxA[1] + boxA[3]]
+            boxB = [boxB[0], boxB[1], boxB[0] + boxB[2], boxB[1] + boxB[3]]
+            xA = max(boxA[0], boxB[0])
+            yA = max(boxA[1], boxB[1])
+            xB = min(boxA[2], boxB[2])
+            yB = min(boxA[3], boxB[3])
+        
+            # 计算交集的面积
+            interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+        
+            # 计算两个边界框的面积
+            boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
+            boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
+        
+            # 计算并集的面积
+            iou = interArea / float(boxAArea + boxBArea - interArea)
+        
+            # 返回计算出的IoU值
+            return iou
+
     def random_cut(self, sample_type, bbox):
         """
         sample type here only has three types: p, m, n
@@ -317,7 +511,12 @@ class ImgTransform:
         while True:
             count += 1
             if count > 1000:
-                raise Exception("1000 times search fail")
+                if sample_type == "p":
+                    return bbox
+                elif sample_type == "m":
+                    return bbox
+                else:
+                    return [0,0,self.width,self.hight]
                 
             # 先随机生成两个轴向的偏移量
             nx_shift = random.randint(-1,1) * random.randint(0,change_step)
@@ -331,8 +530,11 @@ class ImgTransform:
                     + random.randint(5,self.width//3)
                 nh = wh_max
             else:
-                wh_max = max([bbox[2],bbox[3]])\
-                    + random.randint(-1,1) * random.randint(0,10)
+                if max([bbox[2],bbox[3]]) < 34:
+                    wh_max = max([bbox[2],bbox[3]]) + random.randint(0,10)
+                else:
+                    wh_max = max([bbox[2],bbox[3]])\
+                        + random.randint(-1,1) * random.randint(0,10)
             nh = wh_max # make sure the crop is square
             nw = wh_max
 
@@ -448,7 +650,146 @@ class ImgTransform:
         
         return [nimg, nlandmark] # different from wfd sample
 
+    
+    def generate_wfd_Rnet_sample(self):
+        """Rnet 数据结构有所不同
+        "p",     "m",    "n",      "pn",             "sn"
+        正样本 混合样本  负样本  pnet负样本挖掘   pnet高惩罚负样本挖掘
+        """
+
+        sample_list = [] # 生成的样本列表
+        """
+        [
+            [(img,[nbx,nby,nbw,nbh]), xxx, xxx],
+            [positive, mixed, negative, negative, negative],
+            ...
+        ]
+        """ # 将 负样本 生成多个，增加样本数量，平衡正负样本
+
+        pyramid = generate_image_pyramid(self.img, scale_factor=1.1, min_size=(24, 24))
+        result = []
+        for img, scal in pyramid:
+            res = sliding_window(img, step_size=13, window_size=(24, 24), model_trained=p_net)
+            for x, y, w, h, score in res:
+                x, y, w, h = int(x*scal), int(y*scal), int(w*scal), int(h*scal)
+                result.append((x, y, w, h, score))
+        
+        result = nms(result, 0.3)
+
+        positive_trip = [] # 生成正样本
+
+        # 生成正样本
+        gen_p_count = 0
+        for bbox in self.bbox:
+            if self.img_size_check(bbox) == False:
+                continue
+
+            best_iou = 0
+            best_bbox = None
+            for x, y, w, h, score in result:
+                iou = self.cal_iou_wh(bbox, [x, y, w, h])
+                if iou >= 0.6:
+                    if best_iou < iou:
+                        best_iou = iou
+                        best_bbox = [x, y, w, h]
+            
+            if best_bbox != None:
+                nimg = self.img[best_bbox[1]:best_bbox[1]+best_bbox[3],
+                                best_bbox[0]:best_bbox[0]+best_bbox[2], :].copy()
+                nimg = random_color_shift(nimg)
+                nbbox = self.redefine_bbox(best_bbox, bbox)
+                positive_trip.append((nimg, nbbox))
+                gen_p_count += 1
+            else:
+                nimgb = self.random_cut("p", bbox)
+                nimg = self.img[nimgb[1]:nimgb[1]+nimgb[3],
+                                nimgb[0]:nimgb[0]+nimgb[2], :].copy()
+                
+                nimg = random_color_shift(nimg)
+                nbbox = self.redefine_bbox(nimgb, bbox)
+                positive_trip.append((nimg, nbbox))
+        
+        
+        mix_trip = [] # 生成混合样本
+        for i in range(len(positive_trip)):
+            nimgb = self.random_cut("m", positive_trip[i][1])
+            nimg = self.img[nimgb[1]:nimgb[1]+nimgb[3],
+                            nimgb[0]:nimgb[0]+nimgb[2], :].copy()
+            
+            nimg = random_color_shift(nimg)
+            nbbox = self.redefine_bbox(nimgb, positive_trip[i][1])
+            mix_trip.append((nimg, nbbox))
+        
+
+        negative_trip = [] # 生成负样本
+        for i in range(len(positive_trip)):
+            nimgb = self.random_cut("n", positive_trip[i][1])
+            nimg = self.img[nimgb[1]:nimgb[1]+nimgb[3],
+                            nimgb[0]:nimgb[0]+nimgb[2], :].copy()
+            
+            nimg = random_color_shift(nimg)
+            nbbox = self.redefine_bbox(nimgb, positive_trip[i][1])
+            negative_trip.append((nimg, nbbox))
+        
+
+        pnet_negative_trip = [] # 生成pnet负样本挖掘
+        s_pnet_negative_trip = [] # 生成pnet高惩罚负样本挖掘
+        err_sample_list = []
+
+        for x, y, w, h, score in result:
+            max_iou = 0
+            for bbox in self.bbox:
+                iou = self.cal_iou_wh(bbox, [x, y, w, h])
+                if iou > max_iou:
+                    max_iou = iou
+            if max_iou < 0.2:
+                err_sample_list.append([x, y, w, h, score])
+        
+        err_sample_list = sorted(err_sample_list, key=lambda x: x[4], reverse=True)
+        index = 0
+        for x, y, w, h, score in err_sample_list:
+
+            nimg = self.img[y:y+h, x:x+w, :].copy()
+            nimg = random_color_shift(nimg)
+            nbbox = [x, y, w, h]
+
+            if index < len(positive_trip):
+                s_pnet_negative_trip.append((nimg, nbbox))
+            elif index < len(positive_trip)*2:
+                pnet_negative_trip.append((nimg, nbbox))
+            else:
+                break
+
+            index += 1
+
+        for i in range(len(positive_trip) - len(s_pnet_negative_trip)):
+            nimgb = self.random_cut("n", positive_trip[i][1])
+            nimg = self.img[nimgb[1]:nimgb[1]+nimgb[3],
+                            nimgb[0]:nimgb[0]+nimgb[2], :].copy()
+            
+            nimg = random_color_shift(nimg)
+            nbbox = self.redefine_bbox(nimgb, positive_trip[i][1])
+            s_pnet_negative_trip.append((nimg, nbbox))
+        
+        for i in range(len(positive_trip) - len(pnet_negative_trip)):
+            nimgb = self.random_cut("n", positive_trip[i][1])
+            nimg = self.img[nimgb[1]:nimgb[1]+nimgb[3],
+                            nimgb[0]:nimgb[0]+nimgb[2], :].copy()
+            
+            nimg = random_color_shift(nimg)
+            nbbox = self.redefine_bbox(nimgb, positive_trip[i][1])
+            pnet_negative_trip.append((nimg, nbbox))
+
+        for i in range(len(positive_trip)):
+            sample_list.append([positive_trip[i], mix_trip[i], negative_trip[i], pnet_negative_trip[i], s_pnet_negative_trip[i]])
+
+        print("lenth:{}, p:{}, errn:{}".format(len(sample_list), gen_p_count, len(err_sample_list)))
+        
+        return sample_list # allow empty list
+
+
 class BuildDataset:
+
     
     def __init__(self, wfdd, ceba, imgs_path, csv_path):
         self.wfdd = wfdd
@@ -496,7 +837,7 @@ class BuildDataset:
             wfd_imgp, wfd_bbox, _ = self.wfdd.get_data(i)
 
             # 生成样本
-            img_samples = ImgTransform(wfd_imgp, wfd_bbox).generate_wfd_sample()
+            img_samples = ImgTransform(wfd_imgp, wfd_bbox).generate_wfd_Rnet_sample()
             if len(img_samples) == 0:
                 print("WFD No sample generated for {}".format(wfd_imgp))
                 faile_count += 1
@@ -548,7 +889,7 @@ ldmk_path = r"C:\Users\lucyc\Desktop\celebA\list_landmarks_align_celeba.csv"
 basic_path = r"C:\Users\lucyc\Desktop\celebA\img_align_celeba\img_align_celeba"
 
 # mkdir face_loc_d
-os.makedirs(r"C:\Users\lucyc\Desktop\face_loc_dataset\imgs", exist_ok=True)
+os.makedirs(r"C:\Users\lucyc\Desktop\face_loc_R_dataset\imgs", exist_ok=True)
 
 cead = CELEBADriver(bbox_path, ldmk_path, basic_path)
 
@@ -560,8 +901,9 @@ wfd = WFDriver(clas_root_path, mat_path)
 cead.random_init()
 wfd.random_init()
 
-bds = BuildDataset(wfd, cead, r"C:\Users\lucyc\Desktop\face_loc_dataset\imgs", r"C:\Users\lucyc\Desktop\face_loc_dataset")
+bds = BuildDataset(wfd, cead, r"C:\Users\lucyc\Desktop\face_loc_R_dataset\imgs", r"C:\Users\lucyc\Desktop\face_loc_R_dataset")
 bds.generate_dataset()
 
 # belabelabelabela
 # belabelabelabela
+
