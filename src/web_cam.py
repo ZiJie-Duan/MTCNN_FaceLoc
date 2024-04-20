@@ -143,7 +143,7 @@ class PNet(nn.Module):
         return facedet, bbox, landmark
 
 
-def generate_image_pyramid(img, scale_factor=1.2, min_size=(24, 24)):
+def generate_image_pyramid(img, scale_factor=1.2, min_size=(24, 24), scale_factor_base=5):
     """
     生成图像的金字塔。
     
@@ -153,7 +153,6 @@ def generate_image_pyramid(img, scale_factor=1.2, min_size=(24, 24)):
     :return: 金字塔图像列表
     """
     pyramid_images = []
-    scale_factor_base = 4
 
     while True:
         new_width = int(img.shape[1] / scale_factor_base)
@@ -201,7 +200,7 @@ def sliding_window(image, step_size, window_size, model_trained):
             #result.append((x, y, window_size[0], window_size[1]))
             probabilities = F.softmax(face_det, dim=1)
             
-            if probabilities[0][0] > 0.95:
+            if probabilities[0][0] > 0.55:
                 result.append((x, y, window_size[0], window_size[1], probabilities[0][0]))
 
                 # nx = bbox[0][0].item() * x_scale + x
@@ -299,7 +298,7 @@ def verify_face(image, model_trained):
 cap = cv2.VideoCapture(0)  # 0代表计算机的默认摄像头
 
 
-net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\pnet.pth")
+net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\Pnet_epoch_40.pth")
 
 p_net = PNet()
 p_net.load_state_dict(net1.state_dict())
@@ -321,11 +320,11 @@ if not cap.isOpened():
     exit()
 
 
-# # 打开视频文件
+# # # 打开视频文件
 file = r"C:\Users\lucyc\Desktop\机器人舞蹈大赛.mp4"
 cap = cv2.VideoCapture(file)
 
-cap.set(cv2.CAP_PROP_POS_FRAMES, 5000)
+cap.set(cv2.CAP_PROP_POS_FRAMES, 21000)
 
 #img = cv2.imread(r"C:\Users\lucyc\Desktop\IMG_20150528_145916.jpg")
 count = 0
@@ -345,7 +344,7 @@ while True:
         print("Can't receive frame (stream end?). Exiting ...")
         break
 
-    pyramid = generate_image_pyramid(frame, scale_factor=1.5, min_size=(24, 24))
+    pyramid = generate_image_pyramid(frame, scale_factor=1.5, min_size=(24, 24), scale_factor_base=3)
 
     SLID_COUNT = 0
     result = []
