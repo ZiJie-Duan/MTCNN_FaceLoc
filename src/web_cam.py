@@ -160,7 +160,6 @@ def generate_image_pyramid(img, scale_factor=1.2, min_size=(24, 24), scale_facto
 
         if new_width < min_size[0] or new_height < min_size[1]:
             break
-
         img2 = cv2.resize(img, (new_width, new_height))
         pyramid_images.append([img2, scale_factor_base])
         scale_factor_base *= scale_factor # 可以调整以控制金字塔的级别间隔
@@ -236,7 +235,7 @@ def sliding_window2(image, step_size, window_size, model, scale):
     face_det = F.softmax(face_det, dim=1)
     for i in range(face_det.shape[2]):
         for j in range(face_det.shape[3]):
-            if face_det[0][0][i][j] > 0.95:
+            if face_det[0][0][i][j] > 0.90:
                 # calculate the scale
                 result.append(((j * 2)*scale, (i * 2)*scale, 12*scale, 12*scale, face_det[0][0][i][j]))
     # print(result)
@@ -288,7 +287,7 @@ def verify_face(image, model_trained):
         face_det, _,_ = model_trained(image_tensor)
     probabilities = F.softmax(face_det, dim=1)
 
-    if probabilities[0][0] > 0.95:
+    if probabilities[0][0] > 0.75:
         return True, probabilities[0][0]
     else:
         return False, probabilities[0][0]
@@ -297,8 +296,10 @@ def verify_face(image, model_trained):
 # 初始化摄像头
 cap = cv2.VideoCapture(0)  # 0代表计算机的默认摄像头
 
-
-net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\Pnet_epoch_40.pth")
+#net1 = torch.load(r"C:\Users\lucyc\Desktop\model\Pnet\NoneCol\Pnet_epoch_90.pth")
+#net1 = torch.load(r"C:\Users\lucyc\Desktop\model\Pnet\Col\Pnet_Col_90.pth")
+net1 = torch.load(r"C:\Users\lucyc\Desktop\MTCNN_FaceLoc\src\Pnet_epoch_170.pth")
+#net1 = torch.load(r"C:\Users\lucyc\Desktop\model\Pnet\Col_HardNg_1\Pnet_epoch_40.pth")
 
 p_net = PNet()
 p_net.load_state_dict(net1.state_dict())
@@ -320,11 +321,11 @@ if not cap.isOpened():
     exit()
 
 
-# # # 打开视频文件
+# # # # 打开视频文件
 file = r"C:\Users\lucyc\Desktop\机器人舞蹈大赛.mp4"
 cap = cv2.VideoCapture(file)
 
-cap.set(cv2.CAP_PROP_POS_FRAMES, 21000)
+cap.set(cv2.CAP_PROP_POS_FRAMES, 26000)
 
 #img = cv2.imread(r"C:\Users\lucyc\Desktop\IMG_20150528_145916.jpg")
 count = 0

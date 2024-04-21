@@ -57,7 +57,7 @@ class PNet(nn.Module):
         return facedet, bbox, landmark
 
 
-p_net = torch.load(r"C:\Users\lucyc\Desktop\model\Pnet\Col\Pnet_Col_90.pth")
+p_net = torch.load(r"C:\Users\lucyc\Desktop\model\Pnet\Col_HardNg_1\Pnet_epoch_40.pth")
 
 def nms(imgs_list, threshold):
 
